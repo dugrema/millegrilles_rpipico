@@ -31,11 +31,11 @@ pub struct WifiHandler<'a> {
 
 impl<'a> WifiHandler<'a> {
     pub async fn blink(&mut self, delay: Duration) {
-        info!("led on!");
+        debug!("led on!");
         self.control.gpio_set(0, true).await;
         Timer::after(delay).await;
 
-        info!("led off!");
+        debug!("led off!");
         self.control.gpio_set(0, false).await;
     }
 
