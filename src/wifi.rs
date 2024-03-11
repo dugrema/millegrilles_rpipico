@@ -8,11 +8,12 @@ use cyw43::Control;
 use cyw43_pio::PioSpi;
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_rp::bind_interrupts;
+use embassy_rp::{bind_interrupts, Peripherals};
 use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25, PIO0};
+use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_24, PIN_25, PIN_29, PIO0};
 use embassy_rp::pio::{InterruptHandler, Pio};
 use embassy_time::{Duration, Timer};
+use embedded_hal_1::digital::OutputPin;
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
@@ -49,10 +50,14 @@ impl<'a> WifiHandler<'a> {
     }
 }
 
-pub async fn setup<'a>(spawner: Spawner) -> WifiHandler<'a> {
-    let p = embassy_rp::init(Default::default());
+#[embassy_executor::task]
+pub async fn run(pin_23: PIN_23, pin_25: PIN_25, pio0: PIO0, pin_24: PIN_24, pin_29: PIN_29, dma_ch0: DMA_CH0) -> ! {
+    debug!("Start wifi");
+
+    // let p = embassy_rp::init(Default::default());
     let fw = include_bytes!("../cyw43-firmware/43439A0.bin");
     let clm = include_bytes!("../cyw43-firmware/43439A0_clm.bin");
+    debug!("Code wifi importe fw len: {}, clm len: {}", fw.len(), clm.len());
 
     // To make flashing faster for development, you may want to flash the firmwares independently
     // at hardcoded addresses, instead of baking them into the program with `include_bytes!`:
@@ -61,22 +66,44 @@ pub async fn setup<'a>(spawner: Spawner) -> WifiHandler<'a> {
     //let fw = unsafe { core::slice::from_raw_parts(0x10100000 as *const u8, 230321) };
     //let clm = unsafe { core::slice::from_raw_parts(0x10140000 as *const u8, 4752) };
 
-    let pwr = Output::new(p.PIN_23, Level::Low);
-    let cs = Output::new(p.PIN_25, Level::High);
-    let mut pio = Pio::new(p.PIO0, Irqs);
-    let spi = PioSpi::new(&mut pio.common, pio.sm0, pio.irq0, cs, p.PIN_24, p.PIN_29, p.DMA_CH0);
+    // let pwr = Output::new(p.PIN_23, Level::Low);
+    // let cs = Output::new(p.PIN_25, Level::High);
+    // let mut pio = Pio::new(p.PIO0, Irqs);
+    // let spi = PioSpi::new(&mut pio.common, pio.sm0, pio.irq0, cs, p.PIN_24, p.PIN_29, p.DMA_CH0);
 
-    static STATE: StaticCell<cyw43::State> = StaticCell::new();
-    let state = STATE.init(cyw43::State::new());
-    let (_net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
+    let pwr = Output::new(pin_23, Level::Low);
+    let cs = Output::new(pin_25, Level::High);
+    let mut pio = Pio::new(pio0, Irqs);
+    let spi = PioSpi::new(&mut pio.common, pio.sm0, pio.irq0, cs, pin_24, pin_29, dma_ch0);
+
+    let (_net_device, mut control, runner) = {
+        static STATE: StaticCell<cyw43::State> = StaticCell::new();
+        let state = STATE.init(cyw43::State::new());
+        cyw43::new(state, pwr, spi, fw).await
+    };
+    debug!("Recuperer spawner");
+    let spawner = Spawner::for_current_executor().await;
     unwrap!(spawner.spawn(wifi_task(runner)));
 
+    debug!("Init controle");
     control.init(clm).await;
+    debug!("Set wifi powersave");
     control
         .set_power_management(cyw43::PowerManagementMode::PowerSave)
         .await;
 
-    WifiHandler {
+    let mut wifi_handler = WifiHandler {
         control
+    };
+
+    debug!("wifi Scan");
+    wifi_handler.scan().await;
+
+    let delay = Duration::from_secs(1);
+    loop {
+        debug!("wifi Blink");
+        wifi_handler.blink(delay.clone()).await;
+        Timer::after(delay).await;
     }
+
 }

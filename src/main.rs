@@ -7,66 +7,250 @@
 
 mod wifi;
 
-use cyw43_pio::PioSpi;
-use defmt::*;
+// use defmt::*;
 use embassy_executor::Spawner;
-use embassy_rp::bind_interrupts;
-use embassy_rp::gpio::{Level, Output};
-use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_25, PIO0};
-use embassy_rp::pio::{InterruptHandler, Pio};
-use embassy_time::{Duration, Timer};
+
+use cortex_m_rt::entry;
+use defmt::{debug, info, unwrap};
+use embassy_executor::{Executor, InterruptExecutor};
+use embassy_rp::interrupt;
+use embassy_rp::interrupt::{InterruptExt, Priority};
+use embassy_rp::peripherals::{DMA_CH0, PIN_23, PIN_24, PIN_25, PIN_29, PIO0};
+use embassy_time::{Duration, Instant, Timer, TICK_HZ};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-// bind_interrupts!(struct Irqs {
-//     PIO0_IRQ_0 => InterruptHandler<PIO0>;
-// });
+use embassy_rp::gpio::{Level, Output};
+use embassy_rp::multicore::{spawn_core1, Stack};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+// use {defmt_rtt as _, panic_probe as _};
 
-#[embassy_executor::main]
-async fn main(spawner: Spawner) {
-    // let p = embassy_rp::init(Default::default());
-    // let fw = include_bytes!("../cyw43-firmware/43439A0.bin");
-    // let clm = include_bytes!("../cyw43-firmware/43439A0_clm.bin");
-    //
-    // // To make flashing faster for development, you may want to flash the firmwares independently
-    // // at hardcoded addresses, instead of baking them into the program with `include_bytes!`:
-    // //     probe-rs download 43439A0.bin --format bin --chip RP2040 --base-address 0x10100000
-    // //     probe-rs download 43439A0_clm.bin --format bin --chip RP2040 --base-address 0x10140000
-    // //let fw = unsafe { core::slice::from_raw_parts(0x10100000 as *const u8, 230321) };
-    // //let clm = unsafe { core::slice::from_raw_parts(0x10140000 as *const u8, 4752) };
-    //
-    // let pwr = Output::new(p.PIN_23, Level::Low);
-    // let cs = Output::new(p.PIN_25, Level::High);
-    // let mut pio = Pio::new(p.PIO0, Irqs);
-    // let spi = PioSpi::new(&mut pio.common, pio.sm0, pio.irq0, cs, p.PIN_24, p.PIN_29, p.DMA_CH0);
-    //
-    // static STATE: StaticCell<cyw43::State> = StaticCell::new();
-    // let state = STATE.init(cyw43::State::new());
-    // let (_net_device, mut control, runner) = cyw43::new(state, pwr, spi, fw).await;
-    // unwrap!(spawner.spawn(wifi_task(runner)));
+static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
+// static EXECUTOR_MED: InterruptExecutor = InterruptExecutor::new();
+static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
 
-    //
-    //
-    // control.init(clm).await;
-    // control
-    //     .set_power_management(cyw43::PowerManagementMode::PowerSave)
-    //     .await;
 
-    let mut wifi_handler = wifi::setup(spawner.clone()).await;
+static mut CORE1_STACK: Stack<65536> = Stack::new();
+static EXECUTOR0: StaticCell<Executor> = StaticCell::new();
+static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
+// static CHANNEL: Channel<CriticalSectionRawMutex, LedState, 1> = Channel::new();
 
-    wifi_handler.scan().await;
 
-    let delay = Duration::from_secs(1);
+
+#[interrupt]
+unsafe fn SWI_IRQ_2() {
+    EXECUTOR_HIGH.on_interrupt()
+}
+
+#[embassy_executor::task]
+async fn low_priority_loop() {
+    let delay = Duration::from_secs(20);
     loop {
-        // info!("led on!");
-        // control.gpio_set(0, true).await;
-        // Timer::after(delay).await;
-        //
-        // info!("led off!");
-        // control.gpio_set(0, false).await;
-        // Timer::after(delay).await;
-
-        wifi_handler.blink(delay.clone()).await;
+        debug!("Main - loop");
         Timer::after(delay).await;
     }
 }
+
+// #[embassy_executor::main]
+// async fn main(spawner: Spawner) {
+//
+//     let p = embassy_rp::init(Default::default());
+//     debug!("Run wifi");
+//     unwrap!(spawner.spawn(wifi::run(
+//         p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+//     )));
+// }
+
+#[embassy_executor::task]
+async fn core0_task() {
+    loop {
+        info!("Hello from core 0");
+        Timer::after_secs(10).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn core1_task() {
+    loop {
+        info!("Hello from core 1");
+        Timer::after_secs(10).await;
+    }
+}
+
+// #[entry]
+// fn main() -> ! {
+//     debug!("Hello world");
+//
+//     let p = embassy_rp::init(Default::default());
+//
+//     debug!("Spawn core 1");
+//     spawn_core1(p.CORE1, unsafe { &mut CORE1_STACK }, move || {
+//         let executor1 = EXECUTOR1.init(Executor::new());
+//         debug!("Spawning core 1");
+//         executor1.run(|spawner| unwrap!(spawner.spawn(core1_task())));
+//         // executor1.run(|spawner| unwrap!(
+//         //     spawner.spawn(wifi::run(
+//         //         p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+//         //     ))
+//         // ));
+//     });
+//
+//     debug!("Spawn core0");
+//     let executor0 = EXECUTOR0.init(Executor::new());
+//     executor0.run(|spawner| unwrap!(spawner.spawn(core0_task())));
+// }
+
+// #[entry]
+// fn main() -> ! {
+//     debug!("Hello world");
+//
+//     let p = embassy_rp::init(Default::default());
+//
+//     debug!("Spawn core 1");
+//     spawn_core1(p.CORE1, unsafe { &mut CORE1_STACK }, move || {
+//
+//         debug!("Preparer executor high priority");
+//         // High-priority executor: SWI_IRQ_1, priority level 2
+//         interrupt::SWI_IRQ_2.set_priority(Priority::P2);
+//         let spawner = EXECUTOR_HIGH.start(interrupt::SWI_IRQ_2);
+//         // let mut wifi_handler = wifi::setup(spawner).await;
+//         // unwrap!(spawner.spawn(wifi::run(&mut p)));
+//         unwrap!(spawner.spawn(wifi::run(
+//             p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+//         )));
+//
+//         debug!("Preparer executor low priority");
+//         // Low priority executor: runs in thread mode, using WFE/SEV
+//         let executor = EXECUTOR_LOW.init(Executor::new());
+//         executor.run(|spawner| {
+//             unwrap!(spawner.spawn(low_priority_loop()));
+//         });
+//
+//         // let executor1 = EXECUTOR1.init(Executor::new());
+//         // debug!("Spawning core 1");
+//         // // executor1.run(|spawner| unwrap!(spawner.spawn(core1_task())));
+//         // executor1.run(|spawner| unwrap!(
+//         //     spawner.spawn(wifi::run(
+//         //         p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+//         //     ))
+//         // ));
+//     });
+//
+//     debug!("Spawn core0");
+//     let executor0 = EXECUTOR0.init(Executor::new());
+//     executor0.run(|spawner| unwrap!(spawner.spawn(core0_task())));
+// }
+
+#[embassy_executor::task]
+async fn run_high() {
+    loop {
+        info!("        [high] tick!");
+        Timer::after_ticks(673740).await;
+    }
+}
+
+#[entry]
+fn main() -> ! {
+    let p = embassy_rp::init(Default::default());
+
+    debug!("Preparer executor high priority");
+    // High-priority executor: SWI_IRQ_1, priority level 2
+    interrupt::SWI_IRQ_2.set_priority(Priority::P2);
+    let spawner = EXECUTOR_HIGH.start(interrupt::SWI_IRQ_2);
+    unwrap!(spawner.spawn(run_high()));
+    // unwrap!(spawner.spawn(wifi::run(
+    //     p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+    // )));
+
+    debug!("Preparer executor low priority");
+    // Low priority executor: runs in thread mode, using WFE/SEV
+    let executor = EXECUTOR_LOW.init(Executor::new());
+    executor.run(|spawner| {
+        // unwrap!(spawner.spawn(low_priority_loop()));
+        unwrap!(spawner.spawn(wifi::run(
+            p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+        )))
+    });
+}
+
+
+//
+// #[embassy_executor::task]
+// async fn run_high() {
+//     loop {
+//         info!("        [high] tick!");
+//         Timer::after_ticks(673740).await;
+//     }
+// }
+//
+// #[embassy_executor::task]
+// async fn run_med() {
+//     loop {
+//         let start = Instant::now();
+//         info!("    [med] Starting long computation");
+//
+//         // Spin-wait to simulate a long CPU computation
+//         cortex_m::asm::delay(125_000_000); // ~1 second
+//
+//         let end = Instant::now();
+//         let ms = end.duration_since(start).as_ticks() * 1000 / TICK_HZ;
+//         info!("    [med] done in {} ms", ms);
+//
+//         Timer::after_ticks(53421).await;
+//     }
+// }
+//
+// #[embassy_executor::task]
+// async fn run_low() {
+//     loop {
+//         let start = Instant::now();
+//         info!("[low] Starting long computation");
+//
+//         // Spin-wait to simulate a long CPU computation
+//         cortex_m::asm::delay(250_000_000); // ~2 seconds
+//
+//         let end = Instant::now();
+//         let ms = end.duration_since(start).as_ticks() * 1000 / TICK_HZ;
+//         info!("[low] done in {} ms", ms);
+//
+//         Timer::after_ticks(82983).await;
+//     }
+// }
+//
+// static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
+// static EXECUTOR_MED: InterruptExecutor = InterruptExecutor::new();
+// static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
+//
+// #[interrupt]
+// unsafe fn SWI_IRQ_1() {
+//     EXECUTOR_HIGH.on_interrupt()
+// }
+//
+// #[interrupt]
+// unsafe fn SWI_IRQ_0() {
+//     EXECUTOR_MED.on_interrupt()
+// }
+//
+// #[entry]
+// fn main() -> ! {
+//     info!("Hello World!");
+//
+//     let _p = embassy_rp::init(Default::default());
+//
+//     // High-priority executor: SWI_IRQ_1, priority level 2
+//     interrupt::SWI_IRQ_1.set_priority(Priority::P2);
+//     let spawner = EXECUTOR_HIGH.start(interrupt::SWI_IRQ_1);
+//     unwrap!(spawner.spawn(run_high()));
+//
+//     // Medium-priority executor: SWI_IRQ_0, priority level 3
+//     interrupt::SWI_IRQ_0.set_priority(Priority::P3);
+//     let spawner = EXECUTOR_MED.start(interrupt::SWI_IRQ_0);
+//     unwrap!(spawner.spawn(run_med()));
+//
+//     // Low priority executor: runs in thread mode, using WFE/SEV
+//     let executor = EXECUTOR_LOW.init(Executor::new());
+//     executor.run(|spawner| {
+//         unwrap!(spawner.spawn(run_low()));
+//     });
+// }
