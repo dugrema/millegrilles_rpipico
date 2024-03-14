@@ -7,6 +7,7 @@
 
 mod wifi;
 mod messages;
+mod lib_mgcrypto;
 
 // use defmt::*;
 use embassy_executor::Spawner;
@@ -25,7 +26,9 @@ use embassy_rp::gpio::{Level, Output};
 use embassy_rp::multicore::{spawn_core1, Stack};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use messages::FormatMessageTest1;
+use millegrilles_cryptographie::messages_structs::{MessageMilleGrillesBufferHeapless, CONST_NOMBRE_CERTIFICATS_MAX, CONST_BUFFER_MESSAGE_MIN};
+// use messages::FormatMessageTest1;
+use crate::lib_mgcrypto::{test_buffer_heapless, test_build_into_u8, test_hachage_1, test_signer_into};
 // use {defmt_rtt as _, panic_probe as _};
 
 static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
@@ -152,48 +155,48 @@ async fn run_high() {
     }
 }
 
-// #[entry]
-// fn main() -> ! {
-//     let p = embassy_rp::init(Default::default());
-//
-//     debug!("Preparer executor high priority");
-//     // High-priority executor: SWI_IRQ_1, priority level 2
-//     interrupt::SWI_IRQ_2.set_priority(Priority::P2);
-//     let spawner = EXECUTOR_HIGH.start(interrupt::SWI_IRQ_2);
-//     unwrap!(spawner.spawn(run_high()));
-//     // unwrap!(spawner.spawn(wifi::run(
-//     //     p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
-//     // )));
-//
-//     debug!("Preparer executor low priority");
-//     // Low priority executor: runs in thread mode, using WFE/SEV
-//     let executor = EXECUTOR_LOW.init(Executor::new());
-//     executor.run(|spawner| {
-//         // unwrap!(spawner.spawn(low_priority_loop()));
-//         unwrap!(spawner.spawn(wifi::run(
-//             p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
-//         )))
-//     });
-// }
-
 #[entry]
 fn main() -> ! {
-    debug!("Start json test");
-    let contenu = r#"{
-        "valeur_text": "Du texte parsed",
-        "valeur_num": 12
-    }"#;
-    // unwrap!(messages::test_parse(contenu));
-    messages::test_parse(contenu);
-    debug!("Fin json test");
-    let valeur = FormatMessageTest1 {
-        valeur_text: "Du texte static",
-        valeur_num: -192,
-    };
-    messages::test_stringify(valeur);
+    let p = embassy_rp::init(Default::default());
 
-    panic!("Done!");
+    debug!("Preparer executor high priority");
+    // High-priority executor: SWI_IRQ_1, priority level 2
+    interrupt::SWI_IRQ_2.set_priority(Priority::P2);
+    let spawner = EXECUTOR_HIGH.start(interrupt::SWI_IRQ_2);
+    unwrap!(spawner.spawn(run_high()));
+    // unwrap!(spawner.spawn(wifi::run(
+    //     p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+    // )));
+
+    debug!("Preparer executor low priority");
+    // Low priority executor: runs in thread mode, using WFE/SEV
+    let executor = EXECUTOR_LOW.init(Executor::new());
+    executor.run(|spawner| {
+        unwrap!(spawner.spawn(run_low()));
+        // unwrap!(spawner.spawn(wifi::run(
+        //     p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+        // )))
+    });
 }
+
+// #[entry]
+// fn main() -> ! {
+//     debug!("Start json test");
+//     let contenu = r#"{
+//         "valeur_text": "Du texte parsed",
+//         "valeur_num": 12
+//     }"#;
+//     // unwrap!(messages::test_parse(contenu));
+//     messages::test_parse(contenu);
+//     debug!("Fin json test");
+//     let valeur = FormatMessageTest1 {
+//         valeur_text: "Du texte static",
+//         valeur_num: -192,
+//     };
+//     messages::test_stringify(valeur);
+//
+//     panic!("Done!");
+// }
 
 //
 // #[embassy_executor::task]
@@ -220,24 +223,60 @@ fn main() -> ! {
 //         Timer::after_ticks(53421).await;
 //     }
 // }
-//
-// #[embassy_executor::task]
-// async fn run_low() {
-//     loop {
-//         let start = Instant::now();
-//         info!("[low] Starting long computation");
-//
-//         // Spin-wait to simulate a long CPU computation
-//         cortex_m::asm::delay(250_000_000); // ~2 seconds
-//
-//         let end = Instant::now();
-//         let ms = end.duration_since(start).as_ticks() * 1000 / TICK_HZ;
-//         info!("[low] done in {} ms", ms);
-//
-//         Timer::after_ticks(82983).await;
-//     }
-// }
-//
+
+#[embassy_executor::task]
+async fn run_low() {
+    loop {
+        // let start = Instant::now();
+        // info!("[low] Starting long computation");
+
+        // // Spin-wait to simulate a long CPU computation
+        // cortex_m::asm::delay(250_000_000); // ~2 seconds
+        //
+        // let end = Instant::now();
+        // let ms = end.duration_since(start).as_ticks() * 1000 / TICK_HZ;
+        // info!("[low] done in {} ms", ms);
+
+        // Timer::after_ticks(82983).await;
+        run_tests();
+
+        Timer::after_secs(5).await;
+    }
+}
+
+fn run_tests() {
+    let start = Instant::now();
+    info!("[low] Debut hachage");
+    test_hachage_1();
+    let end = Instant::now();
+    let ms = end.duration_since(start).as_ticks() * 1000 / TICK_HZ;
+    info!("[low] done in {} ms", ms);
+
+    let start = Instant::now();
+    info!("[low] Debut signer");
+    test_signer_into();
+    let end = Instant::now();
+    let ms = end.duration_since(start).as_ticks() * 1000 / TICK_HZ;
+    info!("[low] done in {} ms", ms);
+
+    let mut buffer: MessageMilleGrillesBufferHeapless<CONST_BUFFER_MESSAGE_MIN, CONST_NOMBRE_CERTIFICATS_MAX> =
+        MessageMilleGrillesBufferHeapless::new();
+
+    let start = Instant::now();
+    info!("[low] Debut test verification message MilleGrilles");
+    test_buffer_heapless(&mut buffer);
+    let end = Instant::now();
+    let ms = end.duration_since(start).as_ticks() * 1000 / TICK_HZ;
+    info!("[low] done in {} ms", ms);
+
+    let start = Instant::now();
+    info!("[low] Debut test build message MilleGrilles");
+    test_build_into_u8(&mut buffer);
+    let end = Instant::now();
+    let ms = end.duration_since(start).as_ticks() * 1000 / TICK_HZ;
+    info!("[low] done in {} ms", ms);
+}
+
 // static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
 // static EXECUTOR_MED: InterruptExecutor = InterruptExecutor::new();
 // static EXECUTOR_LOW: StaticCell<Executor> = StaticCell::new();
