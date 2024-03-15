@@ -71,7 +71,7 @@ async fn low_priority_loop() {
 async fn core0_task() {
     loop {
         info!("Hello from core 0");
-        Timer::after_secs(10).await;
+        Timer::after_secs(7).await;
     }
 }
 
@@ -94,11 +94,6 @@ async fn core1_task() {
 //         let executor1 = EXECUTOR1.init(Executor::new());
 //         debug!("Spawning core 1");
 //         executor1.run(|spawner| unwrap!(spawner.spawn(core1_task())));
-//         // executor1.run(|spawner| unwrap!(
-//         //     spawner.spawn(wifi::run(
-//         //         p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
-//         //     ))
-//         // ));
 //     });
 //
 //     debug!("Spawn core0");
@@ -159,25 +154,55 @@ async fn run_high() {
 fn main() -> ! {
     let p = embassy_rp::init(Default::default());
 
+    debug!("Spawn core 1");
+    spawn_core1(p.CORE1, unsafe { &mut CORE1_STACK }, move || {
+        let executor1 = EXECUTOR1.init(Executor::new());
+        debug!("Spawning core 1");
+        executor1.run(|spawner| unwrap!(spawner.spawn(
+            wifi::run(p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0)
+        )));
+    });
+
+    debug!("Spawn core 0");
     debug!("Preparer executor high priority");
     // High-priority executor: SWI_IRQ_1, priority level 2
     interrupt::SWI_IRQ_2.set_priority(Priority::P2);
     let spawner = EXECUTOR_HIGH.start(interrupt::SWI_IRQ_2);
     unwrap!(spawner.spawn(run_high()));
-    // unwrap!(spawner.spawn(wifi::run(
-    //     p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
-    // )));
 
     debug!("Preparer executor low priority");
     // Low priority executor: runs in thread mode, using WFE/SEV
     let executor = EXECUTOR_LOW.init(Executor::new());
     executor.run(|spawner| {
-        unwrap!(spawner.spawn(run_low()));
-        // unwrap!(spawner.spawn(wifi::run(
-        //     p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
-        // )))
+        unwrap!(spawner.spawn(
+            run_low()
+        ));
     });
 }
+
+// #[entry]
+// fn main() -> ! {
+//     let p = embassy_rp::init(Default::default());
+//
+//     debug!("Preparer executor high priority");
+//     // High-priority executor: SWI_IRQ_1, priority level 2
+//     interrupt::SWI_IRQ_2.set_priority(Priority::P2);
+//     let spawner = EXECUTOR_HIGH.start(interrupt::SWI_IRQ_2);
+//     unwrap!(spawner.spawn(run_high()));
+//     // unwrap!(spawner.spawn(wifi::run(
+//     //     p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+//     // )));
+//
+//     debug!("Preparer executor low priority");
+//     // Low priority executor: runs in thread mode, using WFE/SEV
+//     let executor = EXECUTOR_LOW.init(Executor::new());
+//     executor.run(|spawner| {
+//         unwrap!(spawner.spawn(run_low()));
+//         // unwrap!(spawner.spawn(wifi::run(
+//         //     p.PIN_23, p.PIN_25, p.PIO0, p.PIN_24, p.PIN_29, p.DMA_CH0
+//         // )))
+//     });
+// }
 
 // #[entry]
 // fn main() -> ! {

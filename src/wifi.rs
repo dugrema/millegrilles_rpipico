@@ -2,7 +2,9 @@
 //!
 //! It does not work with the RP Pico board. See blinky.rs.
 
+use core::cell::{Cell, RefCell};
 use core::str;
+use cortex_m::interrupt::Mutex;
 
 use cyw43::Control;
 use cyw43_pio::PioSpi;
@@ -92,18 +94,24 @@ pub async fn run(pin_23: PIN_23, pin_25: PIN_25, pio0: PIO0, pin_24: PIN_24, pin
         .set_power_management(cyw43::PowerManagementMode::PowerSave)
         .await;
 
-    let mut wifi_handler = WifiHandler {
-        control
-    };
+    let mut wifi_handler = WifiHandler { control };
 
-    debug!("wifi Scan");
-    wifi_handler.scan().await;
+    // let delay = Duration::from_secs(5);
+    // loop {
+    //     debug!("wifi Blink");
+    //     wifi_handler.blink(delay.clone()).await;
+    //     Timer::after(delay).await;
+    // }
 
-    let delay = Duration::from_secs(1);
+    let delay_blink = Duration::from_secs(1);
     loop {
+        debug!("wifi Scan");
+        wifi_handler.scan().await;
         debug!("wifi Blink");
-        wifi_handler.blink(delay.clone()).await;
-        Timer::after(delay).await;
+        for i in 1..10 {
+            wifi_handler.blink(delay_blink.clone()).await;
+            Timer::after(delay_blink).await;
+        }
     }
-
 }
+
