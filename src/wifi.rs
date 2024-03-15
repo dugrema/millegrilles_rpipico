@@ -50,6 +50,10 @@ impl<'a> WifiHandler<'a> {
             }
         }
     }
+
+    // pub async fn connect(&mut self, ssid: &str, passphrase: &str) -> Result<(), >{
+    //     let resultat = self.control.join_wpa2(ssid, passphrase).await;
+    // }
 }
 
 #[embassy_executor::task]

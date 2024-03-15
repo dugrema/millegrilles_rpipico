@@ -88,5 +88,8 @@ chrono = { version = "0.4", default-features = false }
 millegrilles_cryptographie = { path = "/home/mathieu/RustroverProjects/millegrilles_cryptographie" }
 hex = { version = "0.4", default-features = false }
 
+# HTTP
+reqwless = { version = "0.11.0", features = ["embedded-tls"] }
+
 [profile.release]
 debug = 2
